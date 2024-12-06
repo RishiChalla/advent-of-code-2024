@@ -44,8 +44,8 @@ function part1Solution(rawRules, rawOrders) {
 		.reduce((a, b) => a + b, 0);
 }
 
-console.log(part1Solution(exampleRules, exampleOrders));
-console.log(part1Solution(rules, orders));
+console.log(part1Solution(exampleRules, exampleOrders)); // 143
+console.log(part1Solution(rules, orders)); // 4185
 
 function part2Solution(rawRules, rawOrders) {
 	// Each rule is an edge in a directed graph. We assume it is acyclic.
@@ -64,5 +64,5 @@ function part2Solution(rawRules, rawOrders) {
 		.reduce((a, b) => a + b, 0);
 }
 
-console.log(part2Solution(exampleRules, exampleOrders));
-console.log(part2Solution(rules, orders));
+console.log(part2Solution(exampleRules, exampleOrders)); // 123
+console.log(part2Solution(rules, orders)); // 4480
