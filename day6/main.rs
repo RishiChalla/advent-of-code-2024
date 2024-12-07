@@ -40,6 +40,8 @@ impl Direction {
 enum Tile {
 	Obsticle,
 	Freespace { visited: [bool; 4] },
+	/// Guard must persist the existing visited data, there was a sneaky bug here where setting Guard overrided all previous existing data.
+	/// This bug wasted several hours of my life, ~3am EST Saturday December 7th.
 	Guard { visited: [bool; 4] },
 }
 
