@@ -19,16 +19,6 @@ impl Direction {
 		}
 	}
 
-	/// Gets the direction by rotating left from the current direction
-	fn get_left_direction(&self) -> Self {
-		match self {
-			Direction::North => Direction::West,
-			Direction::East => Direction::North,
-			Direction::South => Direction::East,
-			Direction::West => Direction::South,
-		}
-	}
-
 	/// Turns this direction right.
 	fn go_right(&mut self) {
 		*self = self.get_right_direction();
@@ -50,7 +40,7 @@ impl Direction {
 enum Tile {
 	Obsticle,
 	Freespace { visited: [bool; 4] },
-	Guard,
+	Guard { visited: [bool; 4] },
 }
 
 impl Tile {
@@ -59,7 +49,7 @@ impl Tile {
 		match value {
 			'#' => Some(Self::Obsticle),
 			'.' => Some(Self::Freespace { visited: [false; 4] }),
-			'^' => Some(Self::Guard),
+			'^' => Some(Self::Guard { visited: [false; 4] }),
 			_ => None
 		}
 	}
@@ -69,15 +59,16 @@ impl Tile {
 		match self {
 			Tile::Obsticle => false,
 			Tile::Freespace { visited } => visited.iter().any(|x| *x),
-			Tile::Guard => true,
+			Tile::Guard { visited: _ } => true,
 		}
 	}
 
 	/// Checks whether the tile has been traversed in a certain direction.
 	fn is_traversed(&self, direction: Direction) -> bool {
 		match self {
-			Tile::Obsticle | Tile::Guard => false,
+			Tile::Obsticle => false,
 			Tile::Freespace { visited } => visited[direction.get_visited_index()],
+			Tile::Guard { visited: _ } => false,
 		}
 	}
 
@@ -89,13 +80,29 @@ impl Tile {
 				visited[direction.get_visited_index()] = true;
 				Some(())
 			},
-			Tile::Guard => {
-				let mut visited = [false; 4];
+			Tile::Guard { visited } => {
 				visited[direction.get_visited_index()] = true;
-				*self = Tile::Freespace { visited };
+				*self = Tile::Freespace { visited: *visited };
 				Some(())
 			},
 		}
+	}
+
+	/// Changes the current tile to hold the guard. Returns None if this tile is an obsticle
+	fn set_guard(&mut self) -> Option<()> {
+		match self {
+			Tile::Obsticle => None,
+			Tile::Freespace { visited } => {
+				*self = Tile::Guard { visited: *visited };
+				Some(())
+			},
+			Tile::Guard { visited: _ } => Some(()),
+		}
+	}
+
+	/// Returns true if this tile contains a guard.
+	fn is_guard(&self) -> bool {
+		matches!(*self, Tile::Guard { visited: _ })
 	}
 }
 
@@ -104,7 +111,7 @@ impl Display for Tile {
 		match self {
 			Tile::Obsticle => f.write_char('#'),
 			Tile::Freespace { visited } => if visited.iter().any(|x| *x) { f.write_char('X') } else { f.write_char('.') },
-			Tile::Guard => f.write_char('^'),
+			Tile::Guard { visited: _ } => f.write_char('^'),
 		}
 	}
 }
@@ -174,19 +181,6 @@ impl Map {
 			.collect()
 	}
 
-	/// Sets the guard position and direction at a certain point. Sets the current guard position to an unvisited freespace.
-	fn set_guard_position(&mut self, pos: (usize, usize), direction: Direction) {
-		'row: for row in self.map.iter_mut() {
-			for tile in row.iter_mut() {
-				if *tile != Tile::Guard { continue }
-				*tile = Tile::Freespace { visited: [false; 4] };
-				break 'row;
-			}
-		}
-		self.direction = direction;
-		self.map[pos.0][pos.1] = Tile::Guard;
-	}
-
 	/// Traverses the map by one step.
 	/// Returns a tuple of:
 	/// - Vec(y, x) of all locations traversed in this step
@@ -195,7 +189,7 @@ impl Map {
 		// Row the guard is in, and the x position of the guard.
 		let (y, x, row) = self.map.iter_mut()
 			.enumerate()
-			.find_map(|(y, row)| Some((y, row.iter().position(|c| *c == Tile::Guard)?, row)))
+			.find_map(|(y, row)| Some((y, row.iter().position(|c| c.is_guard())?, row)))
 			.ok_or(TraversalStepError::GuardNotFound)?;
 
 		let mut traversed = Vec::new();
@@ -212,7 +206,7 @@ impl Map {
 		};
 
 		if let Some(obsticle) = obsticle_index { // Obsticle found, go to it
-			row[obsticle-1] = Tile::Guard;
+			row[obsticle-1].set_guard();
 			self.direction.go_right();
 			self.rotate_left();
 			Ok((traversed, true))
@@ -257,48 +251,35 @@ pub fn part1_solution(input: &String, max_iters: usize) -> Result<usize, Part1Er
 /// Possible errors in the part 2 solution.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Part2Error {
-	TraversalError(TraversalStepError),
 	MapParsingError,
-	MaxIterationsReached,
 }
 
 /// Part 2 solution to the advent of code day 6.
 /// Puzzle: Count the number of places we could add an obsticle to force the guard into an infinite loop.
 pub fn part2_solution(input: &String, max_iters: usize) -> Result<usize, Part2Error> {
-	let mut map = Map::from_string(input).ok_or(Part2Error::MapParsingError)?;
-	let mut obsticles = 0;
+	let map = Map::from_string(input).ok_or(Part2Error::MapParsingError)?;
+	let indices: Vec<(usize, usize)> = (0..map.map.len()).map(|y| (0..map.map[0].len()).map(move |x| (y, x))).flatten().collect();
+	
+	Ok(indices.par_iter().filter(|(y, x)| {
+		// Exclude anything which already had a barrier
+		if map.map[*y][*x] == Tile::Obsticle { return false; }
 
-	// Loop until we exit the map.
-	for _ in 0..max_iters {
-		let (traversed, can_traverse) = map.traverse().map_err(|err| Part2Error::TraversalError(err))?;
-
-		// Test out all traversed locations in parallel (Excluding last since it already has a barrier)
-		// to see if any of them detect an infinite loop.
-		obsticles += traversed[..traversed.len() - 1].par_iter().filter(|&&pos| {
-			let mut map = map.clone();
-			// Reset the map position to test new obsticle
-			map.rotate_right();
-			let direction = map.direction.get_left_direction();
-			map.set_guard_position(pos, direction);
-			map.map[pos.0][pos.1 + 1] = Tile::Obsticle;
-			// Check response for infinite loop encountered.
-			let response = map.traverse_steps(max_iters);
-			if let Err(err) = response {
-				match err {
-					TraversalError::TraversalStepError(traversal_step_error) => {
-						traversal_step_error == TraversalStepError::InfiniteLoopEncountered
-					},
-					TraversalError::MaxIterationsReached => {
-						println!("Max iterations reached.");
-						false
-					},
-				}
-			} else { false }
-		}).count();
-
-		if !can_traverse { return Ok(obsticles); }
-	}
-	Err(Part2Error::MaxIterationsReached)
+		// Clone the map and add the obsticle, see if it is infinite.
+		let mut map = map.clone();
+		map.map[*y][*x] = Tile::Obsticle;
+		let response = map.traverse_steps(max_iters);
+		if let Err(err) = response {
+			match err {
+				TraversalError::TraversalStepError(traversal_step_error) => {
+					traversal_step_error == TraversalStepError::InfiniteLoopEncountered
+				},
+				TraversalError::MaxIterationsReached => {
+					println!("Max iterations reached.");
+					false
+				},
+			}
+		} else { false }
+	}).count())
 }
 
 pub fn main() {
