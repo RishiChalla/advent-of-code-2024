@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, fmt::{self, Display, Formatter}, ops::{Add, Mul}};
+use std::{borrow::Borrow, fmt::{self, Display, Formatter}};
 
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -6,15 +6,16 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIter
 /// Operands used for evaluating equations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Operand {
-	Add, Mul,
+	Add, Mul, Concat,
 }
 
 impl Operand {
 	/// Evaluates the operator on two items.
-	fn evaluate<T: Add<Output = T> + Mul<Output = T>>(&self, a: T, b: T) -> T {
+	fn evaluate(&self, a: usize, b: usize) -> usize {
 		match self {
 			Operand::Add => a + b,
 			Operand::Mul => a * b,
+			Operand::Concat => format!("{a}{b}").parse().expect("Operand concatenation failed."),
 		}
 	}
 }
@@ -57,10 +58,9 @@ impl Equation {
 			.fold(self.values[0], |a, (&b, op)| op.borrow().evaluate(a, b)))
 	}
 
-	/// Whether or not the target is achievable by some left to right permutation of the operands + and * on the values.
+	/// Whether or not the target is achievable by some left to right permutation of the given operands.
 	/// Returns true when the target is achievable. Returns None if there was an error encountered.
-	fn target_achievable(&self) -> Option<bool> {
-		let operators = [Operand::Add, Operand::Mul];
+	fn target_achievable(&self, operators: &[Operand]) -> Option<bool> {
 		let results = (0..self.values.len() - 1)
 			.map(|_| operators.iter())
 			.multi_cartesian_product()
@@ -79,9 +79,9 @@ fn parse_input(input: &String) -> Result<Vec<Equation>, usize> {
         .collect()
 }
 
-/// Possible errors when attempting to solve part 1
+/// Possible errors when attempting to solve the solution
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Part1Error {
+pub enum SolutionError {
 	/// An error parsing the input
 	ParseError { line: usize },
 	/// An error evaluating an equation
@@ -90,12 +90,26 @@ pub enum Part1Error {
 
 /// Solves part1 - returns the sum of all equation targets which are achievable left to right with
 /// some permutation of the + and * operands.
-pub fn part1_solution(input: &String) -> Result<usize, Part1Error> {
-	let equations = parse_input(input).map_err(|line| Part1Error::ParseError { line })?;
+pub fn part1_solution(input: &String) -> Result<usize, SolutionError> {
+	let equations = parse_input(input).map_err(|line| SolutionError::ParseError { line })?;
 	let achievable = equations.par_iter()
-		.map(|eq| eq.target_achievable())
+		.map(|eq| eq.target_achievable(&[Operand::Add, Operand::Mul]))
 		.collect::<Option<Vec<bool>>>()
-		.ok_or(Part1Error::EvaluationError)?;
+		.ok_or(SolutionError::EvaluationError)?;
+	Ok(achievable.par_iter()
+		.zip(equations)
+		.filter_map(|(achievable, eq)| achievable.then_some(eq.target))
+		.sum())
+}
+
+/// Solves part2 - returns the sum of all equation targets which are achievable left to right with
+/// some permutation of the +, *, and || (concatenation) operands.
+pub fn part2_solution(input: &String) -> Result<usize, SolutionError> {
+	let equations = parse_input(input).map_err(|line| SolutionError::ParseError { line })?;
+	let achievable = equations.par_iter()
+		.map(|eq| eq.target_achievable(&[Operand::Add, Operand::Mul, Operand::Concat]))
+		.collect::<Option<Vec<bool>>>()
+		.ok_or(SolutionError::EvaluationError)?;
 	Ok(achievable.par_iter()
 		.zip(equations)
 		.filter_map(|(achievable, eq)| achievable.then_some(eq.target))
@@ -118,4 +132,7 @@ pub fn main() {
 
 	println!("Part 1 Solution on Example: {:#?}", part1_solution(&example));
 	println!("Part 1 Solution on Input: {:#?}", part1_solution(&input));
+
+	println!("Part 2 Solution on Example: {:#?}", part2_solution(&example));
+	println!("Part 2 Solution on Input: {:#?}", part2_solution(&input));
 }
