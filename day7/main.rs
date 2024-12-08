@@ -37,8 +37,8 @@ impl Display for Equation {
 
 impl Equation {
 	/// Creates an equation from a string, returns None on failure.
-	fn from_string(value: &String) -> Option<Self> {
-		let strs = value.split(": ").map(String::from).collect::<Vec<String>>();
+	fn from_string(value: &str) -> Option<Self> {
+		let strs = value.split(": ").collect::<Vec<&str>>();
 		let (target_str, values_str) = if let [target_str, values_str] = strs.as_slice() {
 			(target_str, values_str)
 		} else { return None };
@@ -71,11 +71,10 @@ impl Equation {
 }
 
 /// Parses an input string into a list of equations, or provides the line number where parsing failed.
-fn parse_input(input: &String) -> Result<Vec<Equation>, usize> {
+fn parse_input(input: &str) -> Result<Vec<Equation>, usize> {
 	input.split('\n')
-		.map(String::from)
         .enumerate()
-        .map(|(line, eq)| Equation::from_string(&eq).ok_or(line))
+        .map(|(line, eq)| Equation::from_string(eq).ok_or(line))
         .collect()
 }
 
@@ -90,7 +89,7 @@ pub enum SolutionError {
 
 /// Solves part1 - returns the sum of all equation targets which are achievable left to right with
 /// some permutation of the + and * operands.
-pub fn part1_solution(input: &String) -> Result<usize, SolutionError> {
+pub fn part1_solution(input: &str) -> Result<usize, SolutionError> {
 	let equations = parse_input(input).map_err(|line| SolutionError::ParseError { line })?;
 	let achievable = equations.par_iter()
 		.map(|eq| eq.target_achievable(&[Operand::Add, Operand::Mul]))
@@ -104,7 +103,7 @@ pub fn part1_solution(input: &String) -> Result<usize, SolutionError> {
 
 /// Solves part2 - returns the sum of all equation targets which are achievable left to right with
 /// some permutation of the +, *, and || (concatenation) operands.
-pub fn part2_solution(input: &String) -> Result<usize, SolutionError> {
+pub fn part2_solution(input: &str) -> Result<usize, SolutionError> {
 	let equations = parse_input(input).map_err(|line| SolutionError::ParseError { line })?;
 	let achievable = equations.par_iter()
 		.map(|eq| eq.target_achievable(&[Operand::Add, Operand::Mul, Operand::Concat]))
@@ -119,7 +118,7 @@ pub fn part2_solution(input: &String) -> Result<usize, SolutionError> {
 
 /// Entry point to the day 7 task.
 pub fn main() {
-	let example = String::from("190: 10 19
+	let example = "190: 10 19
 3267: 81 40 27
 83: 17 5
 156: 15 6
@@ -127,12 +126,12 @@ pub fn main() {
 161011: 16 10 13
 192: 17 8 14
 21037: 9 7 18 13
-292: 11 6 16 20");
-	let input = String::from(include_str!("day7.txt"));
+292: 11 6 16 20";
+	let input = include_str!("day7.txt");
 
-	println!("Part 1 Solution on Example: {:#?}", part1_solution(&example));
-	println!("Part 1 Solution on Input: {:#?}", part1_solution(&input));
+	println!("Part 1 Solution on Example: {:#?}", part1_solution(example));
+	println!("Part 1 Solution on Input: {:#?}", part1_solution(input));
 
-	println!("Part 2 Solution on Example: {:#?}", part2_solution(&example));
-	println!("Part 2 Solution on Input: {:#?}", part2_solution(&input));
+	println!("Part 2 Solution on Example: {:#?}", part2_solution(example));
+	println!("Part 2 Solution on Input: {:#?}", part2_solution(input));
 }

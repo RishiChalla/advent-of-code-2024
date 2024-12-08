@@ -157,10 +157,10 @@ impl Display for Map {
 impl Map {
 
 	/// Creates a map from a string.
-	fn from_string(input: &String) -> Option<Self> {
+	fn from_string(input: &str) -> Option<Self> {
 		let mut map = Self {
 			map: input.lines()
-				.map(|line| line.chars().map(|c| Tile::from_char(c)).collect::<Option<Vec<Tile>>>())
+				.map(|line| line.chars().map(Tile::from_char).collect::<Option<Vec<Tile>>>())
 				.collect::<Option<Vec<Vec<Tile>>>>()?,
 			direction: Direction::North,
 		};
@@ -171,7 +171,7 @@ impl Map {
 	/// Rotates a 2d array rightt
 	fn rotate_right(&mut self) {
 		self.map = (0..self.map[0].len())
-			.map(|i| self.map.iter().rev().map(|row| row[i].clone()).collect())
+			.map(|i| self.map.iter().rev().map(|row| row[i]).collect())
 			.collect()
 	}
 	
@@ -179,7 +179,7 @@ impl Map {
 	fn rotate_left(&mut self) {
 		self.map = (0..self.map[0].len())
 			.rev()
-			.map(|i| self.map.iter().map(|row| row[i].clone()).collect())
+			.map(|i| self.map.iter().map(|row| row[i]).collect())
 			.collect()
 	}
 
@@ -225,7 +225,7 @@ impl Map {
 	/// Traverses until either an error occurs, or we can no longer traverse.
 	fn traverse_steps(&mut self, max_iters: usize) -> Result<(), TraversalError> {
 		let mut counter = 0;
-		while self.traverse().map_err(|err| TraversalError::TraversalStepError(err))?.1 {
+		while self.traverse().map_err(TraversalError::TraversalStepError)?.1 {
 			// Ensure we don't exceed max iterations
 			counter += 1;
 			if counter > max_iters { return Err(TraversalError::MaxIterationsReached); }
@@ -244,9 +244,9 @@ pub enum Part1Error {
 
 /// Part 1 solution to the advent of code day 6.
 /// Puzzle: traverse until the end, and find the number of traversed tiles.
-pub fn part1_solution(input: &String, max_iters: usize) -> Result<usize, Part1Error> {
+pub fn part1_solution(input: &str, max_iters: usize) -> Result<usize, Part1Error> {
 	let mut map = Map::from_string(input).ok_or(Part1Error::MapParsingError)?;
-	map.traverse_steps(max_iters).map_err(|err| Part1Error::TraversalError(err))?;
+	map.traverse_steps(max_iters).map_err(Part1Error::TraversalError)?;
 	Ok(map.count_traversed())
 }
 
@@ -258,9 +258,9 @@ pub enum Part2Error {
 
 /// Part 2 solution to the advent of code day 6.
 /// Puzzle: Count the number of places we could add an obsticle to force the guard into an infinite loop.
-pub fn part2_solution(input: &String, max_iters: usize) -> Result<usize, Part2Error> {
+pub fn part2_solution(input: &str, max_iters: usize) -> Result<usize, Part2Error> {
 	let map = Map::from_string(input).ok_or(Part2Error::MapParsingError)?;
-	let indices: Vec<(usize, usize)> = (0..map.map.len()).map(|y| (0..map.map[0].len()).map(move |x| (y, x))).flatten().collect();
+	let indices: Vec<(usize, usize)> = (0..map.map.len()).flat_map(|y| (0..map.map[0].len()).map(move |x| (y, x))).collect();
 	
 	Ok(indices.par_iter().filter(|(y, x)| {
 		// Exclude anything which already had a barrier
@@ -285,7 +285,7 @@ pub fn part2_solution(input: &String, max_iters: usize) -> Result<usize, Part2Er
 }
 
 pub fn main() {
-	let example = String::from("....#.....
+	let example = "....#.....
 .........#
 ..........
 ..#.......
@@ -294,12 +294,12 @@ pub fn main() {
 .#..^.....
 ........#.
 #.........
-......#...");
-	let input = String::from(include_str!("day6.txt"));
+......#...";
+	let input = include_str!("day6.txt");
 
-	println!("Part 1 solution for Example {:#?}", part1_solution(&example, 20));
-	println!("Part 1 solution for Input {:#?}", part1_solution(&input, 10000));
+	println!("Part 1 solution for Example {:#?}", part1_solution(example, 20));
+	println!("Part 1 solution for Input {:#?}", part1_solution(input, 10000));
 
-	println!("Part 2 solution for Example {:#?}", part2_solution(&example, 50));
-	println!("Part 2 solution for Input {:#?}", part2_solution(&input, 10000));
+	println!("Part 2 solution for Example {:#?}", part2_solution(example, 50));
+	println!("Part 2 solution for Input {:#?}", part2_solution(input, 10000));
 }
