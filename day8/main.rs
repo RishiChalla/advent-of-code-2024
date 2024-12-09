@@ -1,44 +1,21 @@
-use std::{cmp::Ordering, collections::HashMap, fmt::{self, Display, Formatter, Write}};
-use derive_more::{Sub, Add};
+use std::{cmp, collections::HashMap, fmt::{self, Display, Formatter, Write}, ops::Range};
 
 use itertools::Itertools;
-
-/// Describes a single position
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Sub, Add, Hash)]
-struct Position { x: i32, y: i32 }
-
-
-impl Position {
-	/// Creates a new position
-	fn new(x: i32, y: i32) -> Self {
-		Self { x, y }
-	}
-}
-
-impl PartialOrd for Position {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self.x < other.x && self.y < other.y, self.x > other.x && self.y > other.y) {
-            (true, false) => Some(Ordering::Less),
-            (false, true) => Some(Ordering::Greater),
-            (false, false) => (self.x == other.x && self.y == other.y).then_some(Ordering::Equal),
-            _ => None, // Should not occur
-        }
-    }
-}
+use nalgebra::Vector2;
 
 /// Describes a bounding box on the map
 #[derive(Debug, Clone)]
 struct BoundingBox {
 	/// Everything within the bounding box must be >= top_left
-	top_left: Position,
+	top_left: Vector2<i32>,
 	/// Everything within the bounding box must be <= bottom_right
-	bottom_right: Position,
+	bottom_right: Vector2<i32>,
 }
 
 impl BoundingBox {
 	/// Returns whether or not the bounding box includes the given position (true when pos is in the bounds).
-	fn includes(&self, pos: Position) -> bool {
-		pos.x >= self.top_left.x && pos.y >= self.top_left.y && pos.x <= self.bottom_right.x && pos.y <= self.bottom_right.y
+	fn includes(&self, pos: Vector2<i32>) -> bool {
+		pos >= self.top_left && pos <= self.bottom_right
 	}
 }
 
@@ -112,7 +89,7 @@ struct Map {
 	/// The bounds of the map
 	bounds: BoundingBox,
 	/// All antennas on the map.
-	antennas: HashMap<AntennaVariant, Vec<Position>>,
+	antennas: HashMap<AntennaVariant, Vec<Vector2<i32>>>,
 }
 
 impl From<&str> for Map {
@@ -121,14 +98,14 @@ impl From<&str> for Map {
 		let mut antennas = HashMap::new();
 		let positions = lines.iter().enumerate().flat_map(|(y, line)| {
 			line.chars().enumerate().filter_map(move |(x, c)| {
-				Some((AntennaVariant::try_from(c).ok()?, Position::new(x as i32, y as i32)))
+				Some((AntennaVariant::try_from(c).ok()?, Vector2::new(x as i32, y as i32)))
 			})
 		});
 		for (variant, pos) in positions { antennas.entry(variant).or_insert(Vec::new()).push(pos) }
 		Map {
 			bounds: BoundingBox {
-				top_left: Position::new(0, 0),
-				bottom_right: Position::new(lines[0].len() as i32 - 1, lines.len() as i32 - 1)
+				top_left: Vector2::new(0, 0),
+				bottom_right: Vector2::new(lines[0].len() as i32 - 1, lines.len() as i32 - 1)
 			},
 			antennas,
 		}
@@ -137,14 +114,7 @@ impl From<&str> for Map {
 
 impl From<&Map> for String {
 	fn from(map: &Map) -> Self {
-		let mut lines: Vec<Vec<char>> = vec![vec!['.'; map.bounds.bottom_right.x as usize + 1]; map.bounds.bottom_right.y as usize + 1];
-		for (variant, positions) in &map.antennas {
-			for pos in positions { lines[pos.y as usize][pos.x as usize] = (*variant).into(); }	
-		}
-		lines.iter()
-			.map(|line| line.iter().collect::<String>())
-			.collect::<Vec<String>>()
-			.join("\n")
+		map.to_string(None)
 	}
 }
 
@@ -155,23 +125,56 @@ impl Display for Map {
 }
 
 impl Map {
-	/// Gets all antinodes created by the antennas in the 
-	fn get_antinodes(&self) -> HashMap<AntennaVariant, Vec<Position>> {
+
+	/// Converts the map to a displayable string
+	fn to_string(&self, antinodes: Option<&HashMap<AntennaVariant, Vec<Vector2<i32>>>>) -> String {
+		let mut lines: Vec<Vec<char>> = vec![vec!['.'; self.bounds.bottom_right.x as usize + 1]; self.bounds.bottom_right.y as usize + 1];
+		for (variant, positions) in &self.antennas {
+			for pos in positions { lines[pos.y as usize][pos.x as usize] = (*variant).into(); }	
+		}
+		if let Some(antinodes) = antinodes {
+			for pos in antinodes.values().flatten() { lines[pos.y as usize][pos.x as usize] = '#'; }
+		}
+		lines.iter()
+			.map(|line| line.iter().collect::<String>())
+			.collect::<Vec<String>>()
+			.join("\n")
+	}
+
+	/// Gets all antinodes created by the antennas in the map. For each line from two antennas of the same frequency,
+	/// Each item in the range rep will be given its own antinode.
+	fn get_antinodes(&self, reps: Option<Range<usize>>) -> HashMap<AntennaVariant, Vec<Vector2<i32>>> {
+		let reps = if let Some(reps) = reps { reps } else {
+			0..cmp::max(self.bounds.bottom_right.x as usize, self.bounds.bottom_right.y as usize)
+		};
 		self.antennas.iter().map(|(variant, positions)| {
-			let antinodes = positions.iter().permutations(2).filter_map(|antennas| {
+			let antinodes = positions.iter().permutations(2).flat_map(|antennas| {
 				let (&&from, &&to) = antennas.iter().collect_tuple().expect("Expected permutations of 2 antennas");
-				let antinode = to + (to - from);
-				self.bounds.includes(antinode).then_some(antinode)
+				let step = to - from;
+				reps.clone().filter_map(move |idx| {
+					let antinode = to + step * idx as i32;
+					self.bounds.includes(antinode).then_some(antinode)
+				})
 			}).collect_vec();
 			(*variant, antinodes)
 		}).collect()
 	}
 }
 
-/// Finds the number of unique positions antinodes are present in.
+/// Finds the number of unique positions antinodes are present in when only 1 antinode is created per pair of antennas.
 pub fn part1_solution(input: &str) -> usize {
 	Map::from(input)
-		.get_antinodes()
+		.get_antinodes(Some(1..2))
+		.drain()
+		.flat_map(|(_variant, positions)| positions)
+		.unique()
+		.count()
+}
+
+/// Finds the number of unique positions antinodes are present in when any amount of antinodes are created per pair of antennas.
+pub fn part2_solution(input: &str) -> usize {
+	Map::from(input)
+		.get_antinodes(None)
 		.drain()
 		.flat_map(|(_variant, positions)| positions)
 		.unique()
@@ -196,4 +199,7 @@ pub fn main() {
 
 	println!("Part 1 Solution on Example: {:#?}", part1_solution(example));
 	println!("Part 1 Solution on Input: {:#?}", part1_solution(input));
+
+	println!("Part 2 Solution on Example: {:#?}", part2_solution(example));
+	println!("Part 2 Solution on Input: {:#?}", part2_solution(input));
 }
