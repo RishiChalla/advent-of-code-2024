@@ -1,24 +1,29 @@
 use std::{cmp, fmt};
 use std::convert::TryFrom;
+use std::fmt::Display;
 
 /// Represents a block of memory on a disk.
-/// A block has an ID (which groups blocks together), the number of repetitions
-/// in memory, and a gap (empty space) that follows it.
-#[derive(Debug, Clone, Copy)]
+/// A block has an ID (which groups blocks together), size, and offset.
+#[derive(Debug, Clone, PartialEq)]
 struct Block {
     /// The ID of the block. Blocks with the same ID are grouped together.
     id: usize,
-    /// The number of times this block is repeated in memory.
-    repetitions: usize,
-    /// The gap (empty space) following this block.
-    gap: usize,
+    /// The size of this block in memory.
+    size: usize,
+    /// The offset of this block in memory.
+    offset: usize,
 }
 
-impl fmt::Display for Block {
+impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let content: String = self.id.to_string().repeat(self.repetitions);
-        let gap: String = ".".repeat(self.gap);
-        write!(f, "{}{}", content, gap)
+        f.write_str(&self.id.to_string().repeat(self.size))
+    }
+}
+
+impl Block {
+    /// Gets the checksum of the block where each bit's position is multipled by its ID and summed.
+    fn get_checksum(&self) -> usize {
+        (self.offset..self.offset + self.size).map(|pos| pos * self.id).sum()
     }
 }
 
@@ -30,10 +35,14 @@ struct Disk {
     blocks: Vec<Block>,
 }
 
-impl fmt::Display for Disk {
+impl Display for Disk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let display: String = self.blocks.iter().map(|block| block.to_string()).collect();
-        write!(f, "{}", display)
+        let back = if let Some(back) = self.blocks.last() { back } else { return Ok(()) };
+        let mut disk = vec![String::from("."); back.offset + back.size];
+        for block in &self.blocks {
+            disk[block.offset..block.offset + block.size].fill(block.id.to_string());
+        }
+        f.write_str(&disk.join(""))
     }
 }
 
@@ -61,31 +70,24 @@ impl TryFrom<&str> for Disk {
     type Error = DiskParseError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        value
-            .chars()
-            .collect::<Vec<_>>()
-            .chunks(2)
-            .enumerate()
-            .map(|(id, chunk)| {
-                let (reps_char, gaps_char) = match chunk {
-                    [reps_char, gaps_char] => (reps_char, gaps_char),
-                    [reps_char] => (reps_char, &'0'),
+        let blocks = value.chars().collect::<Vec<_>>()
+            .chunks(2).enumerate().map(|(id, chunk)| {
+                let (size_char, gaps_char) = match chunk {
+                    [size_char, gaps_char] => (size_char, gaps_char),
+                    [size_char] => (size_char, &'0'),
                     _ => return Err(DiskParseError::InvalidChunk),
                 };
 
-                let repetitions = reps_char
-                    .to_digit(10)
-                    .ok_or(DiskParseError::InvalidCharacter(*reps_char, id * 2))?
-                    as usize;
-                let gap = gaps_char
-                    .to_digit(10)
-                    .ok_or(DiskParseError::InvalidCharacter(*gaps_char, id * 2 + 1))?
-                    as usize;
-
-                Ok(Block { id, repetitions, gap })
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map(|blocks| Disk { blocks })
+                let size = size_char.to_digit(10).ok_or(DiskParseError::InvalidCharacter(*size_char, id * 2))? as usize;
+                let gap = gaps_char.to_digit(10).ok_or(DiskParseError::InvalidCharacter(*gaps_char, id * 2 + 1))? as usize;
+                Ok((id, size, gap))
+            }).collect::<Result<Vec<_>, _>>()?
+            .iter().scan(0usize, |offset, &(id, size, gap)| {
+                let block = Some(Block { id, size, offset: *offset });
+                *offset += size + gap;
+                block
+            }).collect();
+        Ok(Self { blocks })
     }
 }
 
@@ -95,65 +97,51 @@ impl Disk {
     /// This method iterates through the blocks of the disk and shifts the memory
     /// contents to the left, removing all gaps. The resulting disk has no gaps,
     /// and the memory layout is continuous.
-    ///
-    /// # Returns
-    /// - `Ok(Disk)` if condensation succeeds, containing the new, condensed disk.
-    /// - `Err(CondenseError)` if condensation fails due to recoverable issues.
-    ///
-    /// # Errors
-    /// - `CondenseError::EmptyDisk` if the disk contains no blocks.
-    /// - `CondenseError::InconsistencyDetected` if an unexpected issue arises during condensation.
     pub fn condense(&self) -> Disk {
-        let mut backlog = self.blocks.iter()
-            .enumerate()
-            .rev()
-            .filter_map(|(idx, block)| (block.repetitions > 0).then_some((idx, *block)));
-        let mut current = backlog.next();
-        let blocks = self.blocks.iter().enumerate().filter_map(|(idx, &(mut block))| {
-            if let Some((back_idx, transferring)) = current {
-                if back_idx == idx { return Some(vec![Block { id: transferring.id, repetitions: transferring.repetitions, gap: 0 }]); }
-                if back_idx < idx { return None; }
-            } else {
-                return None;
+        let mut blocks = self.blocks.clone();
+        for mut block in blocks.clone().into_iter().rev() {
+            let removal_block = block.clone();
+            while block.size > 0 {
+                let Some((idx, offset, size)) = blocks.windows(2).enumerate().find_map(|(idx, window)| {
+                    let [current, next] = window else { return None };
+                    if current.offset + current.size >= block.offset { return None };
+                    let gap = next.offset - (current.offset + current.size);
+                    (gap > 0).then_some((idx + 1, current.offset + current.size, cmp::min(gap, block.size)))
+                }) else { break; };
+                block.size -= size;
+                blocks.insert(idx, Block { id: block.id, size, offset })
             }
-            if block.gap == 0 { return Some(vec![block]); }
-            let mut transferred = Vec::with_capacity(block.gap);
-            transferred.push(Block { id: block.id, repetitions: block.repetitions, gap: 0 });
-            while let Some((back_idx, transferring)) = (block.gap > 0).then_some(current.as_mut()).flatten() {
-                if *back_idx <= idx { current = None; break; }
-                let transfer_size = cmp::min(block.gap, transferring.repetitions);
-                block.gap -= transfer_size;
-                transferring.repetitions -= transfer_size;
-                transferred.push(Block { id: transferring.id, repetitions: transfer_size, gap: 0 });
-                if transferring.repetitions == 0 { current = backlog.next(); }
-            }
-            transferred.last_mut().unwrap().gap = block.gap;
-            Some(transferred)
-        }).flatten().collect();
+            let existing_idx = blocks.iter().position(|x| *x == removal_block).unwrap();
+            if block.size == 0 { blocks.remove(existing_idx); }
+            else { blocks[existing_idx].size = block.size; }
+        }
         Self { blocks }
     }
 
+    /// Condenses only full blocks at a time. 
+    ///
+    /// This method moves full blocks to fill gaps without fragmenting the blocks themselves.
+    /// If a block cannot be moved in its entirety due to insufficient space, it will remain in its current position.
     pub fn condense_blocks(&self) -> Disk {
-        let mut blocks = self.blocks.iter().enumerate().map(|(idx, block)| (idx as i32, *block)).collect::<Vec<_>>();
-        for (fragmented_id, fragmenting) in self.blocks.iter().enumerate().rev() {
-            if fragmenting.repetitions == 0 { continue }
-            let existing = blocks.iter_mut().enumerate().find(|(_, (_, block))| block.gap >= fragmenting.repetitions);
-            let (idx, (_, block)) = if let Some((idx, block)) = existing { (idx, block) } else { continue };
-            let gap = block.gap - fragmenting.repetitions;
-            blocks.insert(idx, (-1, Block { id: fragmenting.id, repetitions: fragmenting.repetitions, gap }));
-            let fragmented_position = blocks.iter().position(|(block_id, _)| *block_id == fragmented_id as i32).unwrap();
-            blocks.remove(fragmented_position);
+        let mut blocks = self.blocks.clone();
+        for block in blocks.clone().into_iter().rev() {
+            let Some((idx, offset)) = blocks.windows(2).enumerate().find_map(|(idx, window)| {
+                let [current, next] = window else { return None };
+                if current.offset + current.size >= block.offset { return None };
+                (next.offset - (current.offset + current.size) >= block.size)
+                    .then_some((idx + 1, current.offset + current.size))
+            }) else { continue };
+            let removal_idx = blocks.iter().position(|x| *x == block).unwrap();
+            let mut block = blocks.remove(removal_idx);
+            block.offset = offset;
+            blocks.insert(idx, block);
         }
-        Self { blocks: blocks.into_iter().map(|(_, block)| block).collect() }
+        Self { blocks }
     }
 
     /// Gets the checksum of the disk where each block's position is multipled by its ID and summed.
     fn get_checksum(&self) -> usize {
-        self.blocks.iter()
-            .flat_map(|block| vec![block.id; block.repetitions])
-            .enumerate()
-            .map(|(idx, id)| idx * id)
-            .sum()
+        self.blocks.iter().map(|block| block.get_checksum()).sum()
     }
 }
 
@@ -164,7 +152,6 @@ fn part1_solution(input: &str) -> Result<usize, DiskParseError> {
 
 /// Gets the checksum of the disk
 fn part2_solution(input: &str) -> Result<usize, DiskParseError> {
-    println!("{}", Disk::try_from(input)?.condense_blocks());
     Ok(Disk::try_from(input)?.condense_blocks().get_checksum())
 }
 
@@ -178,5 +165,5 @@ pub fn main() {
 	println!("Part 1 Solution on Input: {:#?}", part1_solution(input));
 
 	println!("Part 2 Solution on Example: {:#?}", part2_solution(example));
-	// println!("Part 2 Solution on Input: {:#?}", part2_solution(input));
+	println!("Part 2 Solution on Input: {:#?}", part2_solution(input));
 }
