@@ -78,6 +78,7 @@ impl Map {
     }
 
     /// Marks a trail on the map and returns it
+    #[allow(dead_code)]
     fn mark_trail(&self, trail: &[Position; 10]) -> String {
         let lines = self.topology.iter().enumerate().map(|(m_x, line)| line.iter().enumerate().map(|(m_y, digit)| {
             if trail.iter().any(|pos| pos.x == m_x && pos.y == m_y) { String::from("+") }
