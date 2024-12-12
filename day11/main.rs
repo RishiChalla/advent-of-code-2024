@@ -14,9 +14,12 @@ impl Stone {
 }
 
 /// Solver for day 11
+#[derive(Default)]
 struct Day11 {
 	/// Static digit map used for quick cached access, contains subdivision modification of all single-digits
 	digit_map: HashMap<usize, Stone>,
+	/// Cached map of count_after_blinks results.
+	cached_counts: HashMap<(usize, usize), usize>
 }
 
 impl Day11 {
@@ -38,7 +41,8 @@ impl Day11 {
 				// 8 * 2024 is 16192 which has a cleaner
 				(8, Stone::new(vec![vec![16192]])),
 				(16192, Stone::new(vec![vec![32772608], vec![3277, 2608], vec![32, 77, 26, 8], vec![3, 2, 7, 7, 2, 6, 16192]])),
-			])
+			]),
+			..Default::default()
 		}
 	}
 
@@ -47,36 +51,48 @@ impl Day11 {
 	/// - If Engraving 0 -> 1
 	/// - Else if **Number of Digits** in Engraving is Even -> Digits split in half, (first half, second half).
 	/// - Else Engraving -> Multiplied by 2024
-	fn count_after_blinks(&self, engraving: usize, blinks: usize) -> usize {
-		// Handle trivial case
-		if blinks == 0 { return 1 }
-
-		// Single digit cases have optimized lookups for quicker higher-blink recursion
-		if let Some(stone) = self.digit_map.get(&engraving) {
-			// We know how many blinks it takes to become length power of 2 - which can be subdivided into single digits
-			// Check if the number of blinks is prior to single-digit subdivsion
-			if let Some(digits) = stone.digits.get(blinks - 1) { return digits.len() }
-			// The number of blinks is more than the single-digit subdivision, we need to recurse.
-			let digits = stone.digits.last().unwrap();
-			let blinks = blinks - stone.digits.len();
-			digits.iter().map(|&digit| self.count_after_blinks(digit, blinks)).sum()
-		} else {
-			// It is not a single digit, we need to split it normally and recurse until it becomes a single digit.
-			let mut engraving_str = engraving.to_string();
-			if engraving_str.len() % 2 == 0 {
-				// Split off returns the second half, and mutates the string to be the first half
-				let second = engraving_str.split_off(engraving_str.len() / 2).parse().unwrap();
-				let first = engraving_str.parse().unwrap();
-				self.count_after_blinks(first, blinks - 1) + self.count_after_blinks(second, blinks - 1)
-			} else {
-				// Multiply by 2024
-				self.count_after_blinks(engraving * 2024, blinks - 1)
-			}
+	fn count_after_blinks(&mut self, engraving: usize, blinks: usize) -> usize {
+		// Check if count has already been cached
+		if let Some(count) = self.cached_counts.get(&(engraving, blinks)) {
+			return *count;
 		}
+
+		let count = {
+			if blinks == 0 { // Handle trivial case
+				1
+			} else if let Some(stone) = self.digit_map.get(&engraving) { // Single digit cases have optimized lookups for quicker higher-blink recursion
+				// We know how many blinks it takes to become length power of 2 - which can be subdivided into single digits
+				// Check if the number of blinks is prior to single-digit subdivsion
+				if let Some(digits) = stone.digits.get(blinks - 1) {
+					digits.len()
+				} else {
+					// The number of blinks is more than the single-digit subdivision, we need to recurse.
+					let digits = stone.digits.last().unwrap();
+					let blinks = blinks - stone.digits.len();
+					digits.clone().iter().map(|&digit| self.count_after_blinks(digit, blinks)).sum()
+				}
+			} else {
+				// It is not a single digit, we need to split it normally and recurse until it becomes a single digit.
+				let mut engraving_str = engraving.to_string();
+				if engraving_str.len() % 2 == 0 {
+					// Split off returns the second half, and mutates the string to be the first half
+					let second = engraving_str.split_off(engraving_str.len() / 2).parse().unwrap();
+					let first = engraving_str.parse().unwrap();
+					self.count_after_blinks(first, blinks - 1) + self.count_after_blinks(second, blinks - 1)
+				} else {
+					// Multiply by 2024
+					self.count_after_blinks(engraving * 2024, blinks - 1)
+				}
+			}
+		};
+
+		// Insert results into cache and return
+		self.cached_counts.insert((engraving, blinks), count);
+		count
 	}
 	
 	/// Counts the number of stones the input stones would subdivide into after a certain number of blinks.
-	fn count_arrangement_after_blinks(&self, input: &[usize], blinks: usize) -> usize {
+	fn count_arrangement_after_blinks(&mut self, input: &[usize], blinks: usize) -> usize {
 		input.iter().map(|&engraving| self.count_after_blinks(engraving, blinks)).sum()
 	}
 }
@@ -84,7 +100,7 @@ impl Day11 {
 
 /// Entry point
 pub fn main() {
-	let solver = Day11::new();
+	let mut solver = Day11::new();
 	let example = vec![125, 17];
 	let input = vec![872027, 227, 18, 9760, 0, 4, 67716, 9245696];
 
