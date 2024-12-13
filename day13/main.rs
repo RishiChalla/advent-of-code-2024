@@ -49,7 +49,9 @@ impl SlotMachine {
 /// Possible errors when parsing a slot machine values
 #[derive(Debug)]
 enum SlotMachineParseError {
+	#[allow(dead_code)]
 	RegexParseError(regex::Error),
+	#[allow(dead_code)]
 	IntegerParseError { value: String, error: ParseIntError },
 	InvalidVectorCount,
 }
