@@ -1,5 +1,4 @@
-use std::num::ParseIntError;
-
+use std::{cmp, fmt::{self, Display, Formatter}, num::ParseIntError};
 
 /// Represents a 2d direction vector
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +121,31 @@ impl Map {
 			self.robots.iter().cloned().filter(|robot| quad.contains(robot.position)).collect()
 		})
 	}
+
+	/// Gets the standard deviation x and y of the robot's positions.
+	fn get_robot_deviation(&self) -> (f32, f32) {
+		let xs: Vec<_> = self.robots.iter().map(|robot| robot.position.x as f32).collect();
+		let ys: Vec<_> = self.robots.iter().map(|robot| robot.position.y as f32).collect();
+		(
+			statistical::standard_deviation(xs.as_slice(), None),
+			statistical::standard_deviation(ys.as_slice(), None),
+		)
+	}
+}
+
+impl Display for Map {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let string = (self.bounds.left..self.bounds.right).map(|y| {
+			(self.bounds.top..self.bounds.bottom).map(|x| {
+				let pos = Vec2 { x, y };
+				match self.robots.iter().filter(|robot| robot.position == pos).count() {
+					0 => '.',
+					num => char::from_digit(cmp::min(num as u32, 9), 10).unwrap(),
+				}
+			}).collect::<String>()
+		}).collect::<Vec<_>>().join("\n");
+		f.write_str(string.as_str())
+    }
 }
 
 /// Part 1 solution - product of the number of robots in each quadrant after 100 steps.
@@ -129,6 +153,19 @@ fn part1_solution(input: &str, bounds: Bounds) -> Result<usize, (usize, MapParse
 	let mut map = Map::parse(input, bounds)?;
 	map.step_n(100);
 	Ok(map.get_robots_by_quadrants().iter().map(|quad| quad.len()).product())
+}
+
+/// Part 2 solution - Simulates 10,000 steps of the robots, and prints them when the
+/// standard deviation of the robots is within a certain threshold to find the christmas tree.
+fn part2_solution(input: &str, bounds: Bounds) -> Result<(), (usize, MapParseError)> {
+	let mut map = Map::parse(input, bounds)?;
+	for i in 1..10000 {
+		map.step_n(1);
+		let (x_deviation, y_deviation) = map.get_robot_deviation();
+		// Manually adjusted deviation threshold to find the tree.
+		if x_deviation < 20.0 && y_deviation < 20.0 { println!("Step {i} - \n{map}"); break; }
+	}
+	Ok(())
 }
 
 /// Entry point
@@ -151,4 +188,7 @@ p=9,5 v=-3,-3";
 
 	println!("Part 1 Solution on Example: {:#?}", part1_solution(example_robots, example_bounds));
 	println!("Part 1 Solution on Input: {:#?}", part1_solution(input_robots, input_bounds));
+	
+	// dbg!(part1_solution(example_robots, example_bounds)); - The solution does not exist for example inputs
+	println!("{:#?}", part2_solution(input_robots, input_bounds)); // Print in case of error
 }
